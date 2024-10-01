@@ -1,0 +1,333 @@
+
+<html>
+<head>
+    <title>Budget Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/react/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"></link>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.3.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+    <script type="text/babel">
+        function App() {
+            const [totalBudget, setTotalBudget] = React.useState(parseFloat(localStorage.getItem('totalBudget')) || 0);
+            const [expenses, setExpenses] = React.useState(JSON.parse(localStorage.getItem('expenses')) || []);
+            const [balance, setBalance] = React.useState(totalBudget - expenses.reduce((acc, expense) => acc + expense.cost, 0));
+            const [budgetInput, setBudgetInput] = React.useState('');
+            const [expenseTitle, setExpenseTitle] = React.useState('');
+            const [expenseCost, setExpenseCost] = React.useState('');
+            const [expenseDate, setExpenseDate] = React.useState('');
+            const [expenseCategory, setExpenseCategory] = React.useState('');
+            const [goal, setGoal] = React.useState(parseFloat(localStorage.getItem('goal')) || 0);
+            const [goalInput, setGoalInput] = React.useState('');
+            const [budgetCurrency, setBudgetCurrency] = React.useState(localStorage.getItem('budgetCurrency') || 'PKR');
+            const [expenseCurrency, setExpenseCurrency] = React.useState(localStorage.getItem('expenseCurrency') || 'PKR');
+            const [exchangeRate, setExchangeRate] = React.useState(1);
+            const [categories, setCategories] = React.useState(JSON.parse(localStorage.getItem('categories')) || ['Food', 'Transport', 'Entertainment', 'Health', 'Other']);
+            const [newCategory, setNewCategory] = React.useState('');
+
+            React.useEffect(() => {
+                localStorage.setItem('totalBudget', totalBudget);
+                localStorage.setItem('expenses', JSON.stringify(expenses));
+                localStorage.setItem('goal', goal);
+                localStorage.setItem('budgetCurrency', budgetCurrency);
+                localStorage.setItem('expenseCurrency', expenseCurrency);
+                localStorage.setItem('categories', JSON.stringify(categories));
+            }, [totalBudget, expenses, goal, budgetCurrency, expenseCurrency, categories]);
+
+            React.useEffect(() => {
+                if (budgetCurrency !== expenseCurrency) {
+                    fetch(`https://api.exchangerate-api.com/v4/latest/${expenseCurrency}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            setExchangeRate(data.rates[budgetCurrency]);
+                        });
+                } else {
+                    setExchangeRate(1);
+                }
+            }, [budgetCurrency, expenseCurrency]);
+
+            const handleSetBudget = () => {
+                const budget = parseFloat(budgetInput);
+                if (!isNaN(budget)) {
+                    setTotalBudget(budget);
+                    setBalance(budget - expenses.reduce((acc, expense) => acc + expense.cost * exchangeRate, 0));
+                    setBudgetInput('');
+                }
+            };
+
+            const handleAddExpense = () => {
+                const cost = parseFloat(expenseCost);
+                if (expenseTitle && !isNaN(cost) && expenseDate && expenseCategory) {
+                    const newExpenses = [...expenses, { title: expenseTitle, cost, date: expenseDate, category: expenseCategory }];
+                    setExpenses(newExpenses);
+                    setBalance(totalBudget - newExpenses.reduce((acc, expense) => acc + expense.cost * exchangeRate, 0));
+                    setExpenseTitle('');
+                    setExpenseCost('');
+                    setExpenseDate('');
+                    setExpenseCategory('');
+                }
+            };
+
+            const handleDeleteExpense = (index) => {
+                const newExpenses = expenses.filter((_, i) => i !== index);
+                setExpenses(newExpenses);
+                setBalance(totalBudget - newExpenses.reduce((acc, expense) => acc + expense.cost * exchangeRate, 0));
+            };
+
+            const handleEditExpense = (index) => {
+                const expense = expenses[index];
+                setExpenseTitle(expense.title);
+                setExpenseCost(expense.cost);
+                setExpenseDate(expense.date);
+                setExpenseCategory(expense.category);
+                handleDeleteExpense(index);
+            };
+
+            const handleExportToExcel = () => {
+                const worksheet = XLSX.utils.json_to_sheet(expenses);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Expenses");
+                XLSX.writeFile(workbook, "expenses.xlsx");
+            };
+
+            const handleExportToPDF = () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                doc.text("Expenses List", 10, 10);
+                expenses.forEach((expense, index) => {
+                    doc.text(`${index + 1}. ${expense.title} - ${expense.cost} - ${expense.date} - ${expense.category}`, 10, 20 + (index * 10));
+                });
+                doc.save("expenses.pdf");
+            };
+
+            const handleSetGoal = () => {
+                const goalValue = parseFloat(goalInput);
+                if (!isNaN(goalValue)) {
+                    setGoal(goalValue);
+                    setGoalInput('');
+                }
+            };
+
+            const handleAddCategory = () => {
+                if (newCategory && !categories.includes(newCategory)) {
+                    setCategories([...categories, newCategory]);
+                    setNewCategory('');
+                }
+            };
+
+            const renderChart = () => {
+                const ctx = document.getElementById('expenseChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: expenses.map(expense => expense.category),
+                        datasets: [{
+                            data: expenses.map(expense => expense.cost),
+                            backgroundColor: [
+                                'rgba(255, 99, 132, 0.2)',
+                                'rgba(54, 162, 235, 0.2)',
+                                'rgba(255, 206, 86, 0.2)',
+                                'rgba(75, 192, 192, 0.2)',
+                                'rgba(153, 102, 255, 0.2)',
+                                'rgba(255, 159, 64, 0.2)'
+                            ],
+                            borderColor: [
+                                'rgba(255, 99, 132, 1)',
+                                'rgba(54, 162, 235, 1)',
+                                'rgba(255, 206, 86, 1)',
+                                'rgba(75, 192, 192, 1)',
+                                'rgba(153, 102, 255, 1)',
+                                'rgba(255, 159, 64, 1)'
+                            ],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+            };
+
+            React.useEffect(() => {
+                renderChart();
+            }, [expenses]);
+
+            React.useEffect(() => {
+                if (((totalBudget - balance) / goal * 100).toFixed(2) >= 100) {
+                    alert("Congratulations! Your goal is completed.");
+                }
+            }, [balance, goal, totalBudget]);
+
+            return (
+                <div className="container mx-auto p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div className="bg-white p-6 rounded-lg shadow-md">
+                            <h2 className="text-xl font-semibold mb-4">Budget</h2>
+                            <input
+                                type="text"
+                                placeholder="Enter Total Amount"
+                                className="w-full p-2 border border-gray-300 rounded mb-4"
+                                value={budgetInput}
+                                onChange={(e) => setBudgetInput(e.target.value)}
+                            />
+                            <select
+                                className="w-full p-2 border border-gray-300 rounded mb-4"
+                                value={budgetCurrency}
+                                onChange={(e) => setBudgetCurrency(e.target.value)}
+                            >
+                                <option value="USD">USD</option>
+                                <option value="EUR">EUR</option>
+                                <option value="GBP">GBP</option>
+                                <option value="INR">INR</option>
+                                <option value="JPY">JPY</option>
+                                <option value="AUD">AUD</option>
+                                <option value="PKR">PKR</option>
+                            </select>
+                            <button className="w-full bg-blue-500 text-white p-2 rounded" onClick={handleSetBudget}>
+                                Set Budget
+                            </button>
+                        </div>
+                        <div className="bg-white p-6 rounded-lg shadow-md">
+                            <h2 className="text-xl font-semibold mb-4">Expenses</h2>
+                            <input
+                                type="text"
+                                placeholder="Enter Title Of Product"
+                                className="w-full p-2 border border-gray-300 rounded mb-4"
+                                value={expenseTitle}
+                                onChange={(e) => setExpenseTitle(e.target.value)}
+                            />
+                            <input
+                                type="text"
+                                placeholder="Enter Cost Of Product"
+                                className="w-full p-2 border border-gray-300 rounded mb-4"
+                                value={expenseCost}
+                                onChange={(e) => setExpenseCost(e.target.value)}
+                            />
+                            <input
+                                type="date"
+                                className="w-full p-2 border border-gray-300 rounded mb-4"
+                                value={expenseDate}
+                                onChange={(e) => setExpenseDate(e.target.value)}
+                            />
+                            <select
+                                className="w-full p-2 border border-gray-300 rounded mb-4"
+                                value={expenseCategory}
+                                onChange={(e) => setExpenseCategory(e.target.value)}
+                            >
+                                <option value="">Select Category</option>
+                                {categories.map((category, index) => (
+                                    <option key={index} value={category}>{category}</option>
+                                ))}
+                            </select>
+                            <select
+                                className="w-full p-2 border border-gray-300 rounded mb-4"
+                                value={expenseCurrency}
+                                onChange={(e) => setExpenseCurrency(e.target.value)}
+                            >
+                                <option value="USD">USD</option>
+                                <option value="EUR">EUR</option>
+                                <option value="GBP">GBP</option>
+                                <option value="INR">INR</option>
+                                <option value="JPY">JPY</option>
+                                <option value="AUD">AUD</option>
+                                <option value="PKR">PKR</option>
+                            </select>
+                            <button className="w-full bg-blue-500 text-white p-2 rounded" onClick={handleAddExpense}>
+                                Check Amount
+                            </button>
+                        </div>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md mb-4">
+                        <h2 className="text-xl font-semibold mb-4">Add New Category</h2>
+                        <input
+                            type="text"
+                            placeholder="Enter New Category"
+                            className="w-full p-2 border border-gray-300 rounded mb-4"
+                            value={newCategory}
+                            onChange={(e) => setNewCategory(e.target.value)}
+                        />
+                        <button className="w-full bg-blue-500 text-white p-2 rounded" onClick={handleAddCategory}>
+                            Add Category
+                        </button>
+                    </div>
+                    <div className="bg-blue-500 text-white p-4 rounded-lg shadow-md mb-4 flex justify-between">
+                        <div>
+                            <h3 className="text-lg font-semibold">Total Budget ({budgetCurrency})</h3>
+                            <p className="text-2xl">{totalBudget}</p>
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold">Expenses ({expenseCurrency})</h3>
+                            <p className="text-2xl">{expenses.reduce((acc, expense) => acc + expense.cost, 0)}</p>
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold">Balance ({budgetCurrency})</h3>
+                            <p className="text-2xl">{balance}</p>
+                        </div>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md mb-4">
+                        <h2 className="text-xl font-semibold mb-4">Goal Setting</h2>
+                        <input
+                            type="text"
+                            placeholder="Enter Budget Goal"
+                            className="w-full p-2 border border-gray-300 rounded mb-4"
+                            value={goalInput}
+                            onChange={(e) => setGoalInput(e.target.value)}
+                        />
+                        <button className="w-full bg-green-500 text-white p-2 rounded" onClick={handleSetGoal}>
+                            Set Goal
+                        </button>
+                        <div className="mt-4">
+                            <h3 className="text-lg font-semibold">Current Goal: {goal} {budgetCurrency}</h3>
+                            <p className="text-2xl">Progress: {((totalBudget - balance) / goal * 100).toFixed(2)}%</p>
+                        </div>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md mb-4">
+                        <h2 className="text-xl font-semibold mb-4">Expenses List</h2>
+                        <div className="space-y-4">
+                            {expenses.map((expense, index) => (
+                                <div key={index} className="flex justify-between items-center">
+                                    <div className="flex items-center">
+                                        <div className="w-1 bg-blue-500 h-6 mr-2"></div>
+                                        <p>{expense.title}</p>
+                                    </div>
+                                    <div className="flex items-center">
+                                        <p className="mr-4">{expense.cost}</p>
+                                        <p className="mr-4">{expense.date}</p>
+                                        <p className="mr-4">{expense.category}</p>
+                                        <i className="fas fa-edit text-blue-500 mr-2 cursor-pointer" onClick={() => handleEditExpense(index)}></i>
+                                        <i className="fas fa-trash-alt text-blue-500 cursor-pointer" onClick={() => handleDeleteExpense(index)}></i>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-4 flex justify-end space-x-4">
+                            <button className="bg-green-500 text-white p-2 rounded" onClick={handleExportToExcel}>
+                                Export to Excel
+                            </button>
+                            <button className="bg-red-500 text-white p-2 rounded" onClick={handleExportToPDF}>
+                                Export to PDF
+                            </button>
+                        </div>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-md mb-4">
+                        <h2 className="text-xl font-semibold mb-4">Spending Patterns</h2>
+                        <div className="relative h-64">
+                            <canvas id="expenseChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
